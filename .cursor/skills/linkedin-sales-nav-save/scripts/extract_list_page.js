@@ -1,8 +1,12 @@
 () => {
   const href = location.href || "";
   const title = document.title || "";
-  const blocked = /authwall|signup|login|checkpoint/i.test(href + " " + title);
   const text = (document.body?.innerText || "").replace(/\u00a0/g, " ");
+  const blocked =
+    /authwall|signup|checkpoint|captcha|\/login|\/challenge/i.test(`${href} ${title}`) ||
+    /unusual activity|verify your identity|security challenge|restricted account/i.test(
+      text.slice(0, 2500)
+    );
   const lines = text
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())

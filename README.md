@@ -8,7 +8,9 @@ Teammates download a LinkedIn Sales Navigator **people list** to Excel from Chro
 2. Unzip, then in Chrome go to `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and pick the `salesnav-list-save` folder.
 3. Open a saved people list. Click **Download Excel**. The file lands in Downloads.
 
-It only works on saved people lists (`/sales/lists/people/{id}`), not search results. Chrome uses the Sales Navigator login already in the browser.
+It only works on saved people lists (`/sales/lists/people/{id}`), not search results. It runs in your real Chrome session, scrolls and clicks Next with human-like pauses, and stops if LinkedIn shows a checkpoint. Nothing can make LinkedIn “unbannable”; this is the lowest-risk design because it is not a second automated browser.
+
+If the extension is already installed, click **Reload** on `chrome://extensions` after updating.
 
 ## Cursor / CLI (optional)
 

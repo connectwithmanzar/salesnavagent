@@ -1,9 +1,7 @@
 const JOB_KEY = "snSaveJob";
 const HOST_ID = "sn-save-host";
-const FIRST_WAIT_MS = 4500;
-const RETRY_WAIT_MS = 1500;
 const MAX_PAGES = 40;
-const MAX_ATTEMPTS = 8;
+const MAX_ATTEMPTS = 4;
 
 function listIdFromUrl(url) {
   const match = String(url || "").match(/\/sales\/lists\/people\/(\d+)/);
@@ -18,10 +16,6 @@ function pageUrlFor(url, n) {
     parsed.searchParams.set("sortOrder", "DESCENDING");
   }
   return parsed.toString();
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function readJob() {
@@ -51,12 +45,12 @@ function panelHtml(state) {
   const body = running
     ? `Page ${state.page || 1} · ${state.leads?.length || 0} leads${
         state.total ? ` of ${state.total}` : ""
-      }`
+      }. Paging slowly in your Chrome session.`
     : done
       ? `${state.leads?.length || 0} leads saved to Downloads`
       : error
         ? state.message || "Try again on this people list."
-        : "Download this people list to Excel.";
+        : "Download this people list to Excel. It pages through the list slowly, like a person.";
   const action = running
     ? `<button class="ghost" id="sn-cancel" type="button">Cancel</button>`
     : `<button class="primary" id="sn-go" type="button">Download Excel</button>`;
@@ -119,20 +113,43 @@ function render(state) {
   const go = host.shadowRoot.getElementById("sn-go");
   const cancel = host.shadowRoot.getElementById("sn-cancel");
   if (go) go.addEventListener("click", () => startJob());
-  if (cancel) cancel.addEventListener("click", () => stopJob("Cancelled."));
+  if (cancel) cancel.addEventListener("click", () => stopJob());
+}
+
+function currentPage() {
+  const match = location.href.match(/[?&]page=(\d+)/i);
+  return match ? parseInt(match[1], 10) : 1;
 }
 
 async function scrapeOnce() {
   let last = {};
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    await sleep(attempt === 0 ? FIRST_WAIT_MS : RETRY_WAIT_MS);
+    if (attempt === 0) await humanPause(5000, 8000);
+    else await humanPause(2000, 3500);
+    if (pageLooksRestricted()) return { blocked: true, leads: [] };
     const data = extractListPage();
     if (data) last = data;
     if (data?.blocked) return data;
     if (data?.leads?.length) return data;
-    if (data?.listName && attempt >= 4) return data;
+    if (data?.listName && attempt >= 2) return data;
   }
   return last;
+}
+
+async function restBetweenPages(job) {
+  const n = (job.scrapedPages || []).length;
+  if (n > 0 && n % 4 === 0) await humanPause(12000, 22000);
+  else await humanPause(6000, 11000);
+}
+
+async function moveToNextPage(job) {
+  const moved = await goToNextListPage();
+  if (moved === "restricted") return "restricted";
+  if (moved === "clicked") return "clicked";
+  job.page = currentPage() + 1;
+  await writeJob(job);
+  location.assign(pageUrlFor(job.startUrl || location.href, job.page));
+  return "reload";
 }
 
 async function startJob() {
@@ -149,20 +166,15 @@ async function startJob() {
     total: 0,
     empty: 0,
     message: "",
+    fingerprints: [],
   };
   await writeJob(job);
   render(job);
-  const firstPage = pageUrlFor(location.href, 1);
-  if (pageUrlFor(location.href, currentPage()) !== firstPage) {
-    location.assign(firstPage);
+  if (currentPage() !== 1) {
+    location.assign(pageUrlFor(location.href, 1));
     return;
   }
   await continueJob(job);
-}
-
-function currentPage() {
-  const match = location.href.match(/[?&]page=(\d+)/i);
-  return match ? parseInt(match[1], 10) : 1;
 }
 
 async function stopJob() {
@@ -171,11 +183,17 @@ async function stopJob() {
 }
 
 async function finishJob(job) {
+  if (job.blocked || pageLooksRestricted()) {
+    job.status = "error";
+    job.message =
+      "LinkedIn asked for a check. Stopped. Sign in normally, wait, then try a smaller list later.";
+    await writeJob(job);
+    render(job);
+    return;
+  }
   if (!job.leads.length) {
     job.status = "error";
-    job.message = job.blocked
-      ? "Sign into Sales Navigator, then click Download Excel."
-      : "No leads found on this list. Stay on the people-list tab and retry.";
+    job.message = "No leads found on this list. Stay on the people-list tab and retry.";
     await writeJob(job);
     render(job);
     return;
@@ -187,22 +205,7 @@ async function finishJob(job) {
   setTimeout(() => writeJob(null), 8000);
 }
 
-async function continueJob(job) {
-  render(job);
-  job.scrapedPages = job.scrapedPages || [];
-  if (job.scrapedPages.includes(currentPage()) && job.leads.length) {
-    await finishJob(job);
-    return;
-  }
-  const data = await scrapeOnce();
-  if (data?.blocked) {
-    job.blocked = true;
-    await finishJob(job);
-    return;
-  }
-  if (data?.listName) job.listName = data.listName;
-  if (data?.total) job.total = Number(data.total) || job.total;
-  const leads = data?.leads || [];
+function mergeLeads(job, leads) {
   const seen = new Set(job.seen || []);
   for (const lead of leads) {
     const key = (lead.linkedin_url || lead.name || "").toLowerCase();
@@ -211,21 +214,62 @@ async function continueJob(job) {
     job.leads.push(lead);
   }
   job.seen = Array.from(seen);
-  job.lastScrapedPage = currentPage();
-  if (!job.scrapedPages.includes(currentPage())) job.scrapedPages.push(currentPage());
-  if (!leads.length) job.empty += 1;
-  else job.empty = 0;
-  await writeJob(job);
-  render(job);
+}
 
-  const reachedTotal = job.total && job.leads.length >= job.total;
-  if (reachedTotal || job.page >= MAX_PAGES || job.empty >= 2) {
-    await finishJob(job);
-    return;
+async function continueJob(job) {
+  while (job.status === "running") {
+    if (pageLooksRestricted()) {
+      job.blocked = true;
+      await finishJob(job);
+      return;
+    }
+    render(job);
+    await browseListLikeAPerson();
+    const data = await scrapeOnce();
+    if (data?.blocked || pageLooksRestricted()) {
+      job.blocked = true;
+      await finishJob(job);
+      return;
+    }
+    if (data?.listName) job.listName = data.listName;
+    if (data?.total) job.total = Number(data.total) || job.total;
+    const leads = data?.leads || [];
+    const fingerprint = listFingerprint();
+    job.fingerprints = job.fingerprints || [];
+    if (job.fingerprints.includes(fingerprint) && job.leads.length) {
+      await finishJob(job);
+      return;
+    }
+    job.fingerprints.push(fingerprint);
+    mergeLeads(job, leads);
+    job.lastScrapedPage = currentPage();
+    job.scrapedPages = job.scrapedPages || [];
+    if (!job.scrapedPages.includes(currentPage())) job.scrapedPages.push(currentPage());
+    if (!leads.length) job.empty += 1;
+    else job.empty = 0;
+    job.page = currentPage();
+    await writeJob(job);
+    render(job);
+
+    const reachedTotal = job.total && job.leads.length >= job.total;
+    if (reachedTotal || job.scrapedPages.length >= MAX_PAGES || job.empty >= 2) {
+      await finishJob(job);
+      return;
+    }
+
+    await restBetweenPages(job);
+    const latest = await readJob();
+    if (!latest || latest.status !== "running") return;
+    Object.assign(job, latest);
+
+    const moved = await moveToNextPage(job);
+    if (moved === "restricted") {
+      job.blocked = true;
+      await finishJob(job);
+      return;
+    }
+    if (moved === "reload") return;
   }
-  job.page = currentPage() + 1;
-  await writeJob(job);
-  location.assign(pageUrlFor(job.startUrl || location.href, job.page));
 }
 
 async function boot() {
@@ -234,22 +278,7 @@ async function boot() {
   const job = await readJob();
   if (job?.status === "running" && job.listId === lid) {
     render(job);
-    if (job.lastScrapedPage === currentPage() && job.leads.length) {
-      const reachedTotal = job.total && job.leads.length >= job.total;
-      if (reachedTotal || job.page >= MAX_PAGES) {
-        await finishJob(job);
-        return;
-      }
-      job.page = currentPage() + 1;
-      await writeJob(job);
-      location.assign(pageUrlFor(job.startUrl || location.href, job.page));
-      return;
-    }
     await continueJob(job);
-    return;
-  }
-  if (job?.status === "running" && job.listId !== lid) {
-    render({ status: "idle" });
     return;
   }
   render(job && job.listId === lid ? job : { status: "idle" });

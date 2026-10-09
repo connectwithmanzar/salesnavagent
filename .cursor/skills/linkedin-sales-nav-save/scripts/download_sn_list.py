@@ -15,6 +15,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from excel import write_files
+from human import CHECKPOINT_RE, browse_like_person, human_pause, rest_between_pages
 from parse import company_mix, list_id, page_url
 
 try:
@@ -27,8 +28,8 @@ DEFAULT_PROFILE = Path.home() / ".salesnavagent" / "chrome-profile"
 DEFAULT_OUT = Path.home() / "Downloads"
 EXTRACT_JS = JS_PATH.read_text(encoding="utf-8")
 LOGIN_WAIT_S = 180
-PAGE_ATTEMPTS = 8
-LOGIN_RE = re.compile(r"authwall|signup|/login|checkpoint", re.I)
+PAGE_ATTEMPTS = 4
+LOGIN_RE = re.compile(CHECKPOINT_RE, re.I)
 
 
 def die_missing_playwright() -> None:
@@ -44,9 +45,7 @@ def launch_context(playwright, profile: Path):
     options = {
         "user_data_dir": str(profile),
         "headless": False,
-        "viewport": {"width": 1440, "height": 900},
-        "ignore_default_args": ["--enable-automation"],
-        "args": ["--disable-blink-features=AutomationControlled"],
+        "viewport": {"width": 1280, "height": 800},
     }
     try:
         return playwright.chromium.launch_persistent_context(channel="chrome", **options)
@@ -64,11 +63,17 @@ def extract(page) -> dict:
     return raw or {}
 
 
-def on_login_wall(page, data: dict) -> bool:
-    if data.get("blocked"):
+def on_login_wall(page, data: dict | None = None) -> bool:
+    if data and data.get("blocked"):
         return True
     href = (page.url or "") + " " + (page.title() or "")
-    return bool(LOGIN_RE.search(href))
+    if LOGIN_RE.search(href):
+        return True
+    try:
+        text = page.inner_text("body")[:2500]
+    except Exception:
+        text = ""
+    return bool(LOGIN_RE.search(text))
 
 
 def wait_for_login(page) -> None:
@@ -86,38 +91,67 @@ def wait_for_login(page) -> None:
     raise SystemExit("Still on the LinkedIn login screen. Sign in and run the command again.")
 
 
-def scrape_page(page, url: str, n: int) -> dict:
-    page.goto(page_url(url, n), wait_until="domcontentloaded")
+def abort_checkpoint() -> None:
+    raise SystemExit(
+        "LinkedIn asked for a check. Stopped to protect the account. "
+        "Wait, use the list in Chrome normally, then retry later. Prefer the Chrome extension."
+    )
+
+
+def scrape_current(page) -> dict:
+    browse_like_person(page)
     last: dict = {}
-    first_wait = 4.0 if n == 1 else 5.0
     for attempt in range(PAGE_ATTEMPTS):
-        time.sleep(first_wait if attempt == 0 else 1.5)
+        human_pause(5.0, 8.0) if attempt == 0 else human_pause(2.0, 3.5)
         data = extract(page)
         if data:
             last = data
-        if data.get("blocked"):
-            return data
+        if on_login_wall(page, data):
+            return {"blocked": True, "leads": []}
         if data.get("leads"):
             return data
-        if data.get("listName") and attempt >= 4:
+        if data.get("listName") and attempt >= 2:
             return data
     return last
+
+
+def fingerprint(page, data: dict) -> str:
+    leads = data.get("leads") or []
+    first = (leads[0] or {}).get("linkedin_url") if leads else ""
+    return f"{page.url}|{first}"
+
+
+def click_next(page) -> bool:
+    selectors = [
+        "button[aria-label='Next']",
+        "button[aria-label='Next page']",
+        "button.artdeco-pagination__button--next",
+    ]
+    for selector in selectors:
+        loc = page.locator(selector)
+        if loc.count() and loc.first.is_enabled():
+            loc.first.click()
+            return True
+    return False
 
 
 def collect_leads(page, url: str) -> tuple[list[dict], str, int]:
     all_leads: list[dict] = []
     seen: set[str] = set()
+    seen_prints: set[str] = set()
     list_name = ""
     total_hint = 0
     empty = 0
-    for page_n in range(1, 41):
+    page_n = 1
+    while page_n <= 40:
         print(f"page {page_n}...", flush=True)
-        data = scrape_page(page, url, page_n)
+        data = scrape_current(page)
         if on_login_wall(page, data):
-            wait_for_login(page)
-            data = scrape_page(page, url, page_n)
-            if on_login_wall(page, data):
-                raise SystemExit("LinkedIn login wall. Sign into Sales Navigator in the browser and retry.")
+            abort_checkpoint()
+        mark = fingerprint(page, data)
+        if mark in seen_prints and all_leads:
+            break
+        seen_prints.add(mark)
         if data.get("listName"):
             list_name = data["listName"]
         if data.get("total"):
@@ -126,10 +160,10 @@ def collect_leads(page, url: str) -> tuple[list[dict], str, int]:
         print(f"  {len(leads)} rows | list={list_name!r} total={total_hint}", flush=True)
         if not leads:
             empty += 1
-            if empty >= 2 or (total_hint and len(all_leads) >= total_hint):
+            if empty >= 2:
                 break
-            continue
-        empty = 0
+        else:
+            empty = 0
         new = 0
         for lead in leads:
             key = (lead.get("linkedin_url") or lead.get("name") or "").lower()
@@ -141,8 +175,22 @@ def collect_leads(page, url: str) -> tuple[list[dict], str, int]:
         print(f"  +{new} unique (running {len(all_leads)})", flush=True)
         if total_hint and len(all_leads) >= total_hint:
             break
-        if new == 0:
-            break
+        rest_between_pages(page_n)
+        before = fingerprint(page, data)
+        if click_next(page):
+            deadline = time.time() + 14
+            while time.time() < deadline:
+                time.sleep(0.5)
+                nxt = extract(page)
+                if on_login_wall(page, nxt):
+                    abort_checkpoint()
+                if fingerprint(page, nxt) != before:
+                    break
+            else:
+                page.goto(page_url(url, page_n + 1), wait_until="domcontentloaded")
+        else:
+            page.goto(page_url(url, page_n + 1), wait_until="domcontentloaded")
+        page_n += 1
     return all_leads, list_name, total_hint
 
 
@@ -173,12 +221,13 @@ def main(argv: list[str] | None = None) -> None:
     url = args.url.strip()
     lid = list_id(url)
     print(f"list {lid}", flush=True)
+    print("Paging slowly in a real Chrome window. Prefer the Chrome extension for less risk.", flush=True)
 
     with sync_playwright() as playwright:
         context = launch_context(playwright, args.profile)
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(page_url(url, 1), wait_until="domcontentloaded")
-        time.sleep(3)
+        human_pause(3.0, 5.0)
         first = extract(page)
         if on_login_wall(page, first):
             wait_for_login(page)
