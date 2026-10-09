@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Sales Nav List Save",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Download a LinkedIn Sales Navigator people list to Excel, paging through it slowly in your own Chrome session.",
   "permissions": ["storage", "activeTab"],
   "host_permissions": ["https://www.linkedin.com/*"],

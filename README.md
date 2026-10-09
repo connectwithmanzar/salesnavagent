@@ -12,13 +12,15 @@ It only works on saved people lists (`/sales/lists/people/{id}`), not search res
 
 If the extension is already installed, click **Reload** on `chrome://extensions` after updating.
 
-## Cursor / CLI (optional)
+## Cursor / CLI on a Mac (fast path)
 
-For local agent use, clone this repo, run `./install.sh`, and either paste a list URL in Cursor or:
+Keep the people list open in Google Chrome (already logged into Sales Navigator). Then:
 
 ```bash
 python3 scripts/download_sn_list.py 'https://www.linkedin.com/sales/lists/people/{ID}'
 ```
+
+That uses Apple Events (`osascript`) on the Chrome tab you already have — the same method as before. Wait is only ~4–5s per page so the list can render. If macOS asks, allow Cursor/Terminal to control Google Chrome under System Settings → Privacy & Security → Automation.
 
 ```bash
 python3 -m unittest discover -s tests

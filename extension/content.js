@@ -1,7 +1,7 @@
 const JOB_KEY = "snSaveJob";
 const HOST_ID = "sn-save-host";
 const MAX_PAGES = 40;
-const MAX_ATTEMPTS = 4;
+const MAX_ATTEMPTS = 8;
 
 function listIdFromUrl(url) {
   const match = String(url || "").match(/\/sales\/lists\/people\/(\d+)/);
@@ -45,12 +45,12 @@ function panelHtml(state) {
   const body = running
     ? `Page ${state.page || 1} · ${state.leads?.length || 0} leads${
         state.total ? ` of ${state.total}` : ""
-      }. Paging slowly in your Chrome session.`
+      }`
     : done
       ? `${state.leads?.length || 0} leads saved to Downloads`
       : error
         ? state.message || "Try again on this people list."
-        : "Download this people list to Excel. It pages through the list slowly, like a person.";
+        : "Download this people list to Excel.";
   const action = running
     ? `<button class="ghost" id="sn-cancel" type="button">Cancel</button>`
     : `<button class="primary" id="sn-go" type="button">Download Excel</button>`;
@@ -124,28 +124,19 @@ function currentPage() {
 async function scrapeOnce() {
   let last = {};
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    if (attempt === 0) await humanPause(5000, 8000);
-    else await humanPause(2000, 3500);
+    await sleep(attempt === 0 ? 4000 : 1500);
     if (pageLooksRestricted()) return { blocked: true, leads: [] };
     const data = extractListPage();
     if (data) last = data;
     if (data?.blocked) return data;
     if (data?.leads?.length) return data;
-    if (data?.listName && attempt >= 2) return data;
+    if (data?.listName && attempt >= 4) return data;
   }
   return last;
 }
 
-async function restBetweenPages(job) {
-  const n = (job.scrapedPages || []).length;
-  if (n > 0 && n % 4 === 0) await humanPause(12000, 22000);
-  else await humanPause(6000, 11000);
-}
-
 async function moveToNextPage(job) {
-  const moved = await goToNextListPage();
-  if (moved === "restricted") return "restricted";
-  if (moved === "clicked") return "clicked";
+  if (pageLooksRestricted()) return "restricted";
   job.page = currentPage() + 1;
   await writeJob(job);
   location.assign(pageUrlFor(job.startUrl || location.href, job.page));
@@ -224,7 +215,6 @@ async function continueJob(job) {
       return;
     }
     render(job);
-    await browseListLikeAPerson();
     const data = await scrapeOnce();
     if (data?.blocked || pageLooksRestricted()) {
       job.blocked = true;
@@ -257,7 +247,6 @@ async function continueJob(job) {
       return;
     }
 
-    await restBetweenPages(job);
     const latest = await readJob();
     if (!latest || latest.status !== "running") return;
     Object.assign(job, latest);

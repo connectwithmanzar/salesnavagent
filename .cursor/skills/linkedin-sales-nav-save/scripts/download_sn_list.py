@@ -14,6 +14,7 @@ HERE = Path(__file__).resolve().parent
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
+import chrome_osa
 from excel import write_files
 from human import CHECKPOINT_RE, browse_like_person, human_pause, rest_between_pages
 from parse import company_mix, list_id, page_url
@@ -211,23 +212,40 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_OUT,
         help="Output folder (default: Downloads)",
     )
+    parser.add_argument(
+        "--engine",
+        choices=("chrome", "playwright"),
+        default="chrome" if sys.platform == "darwin" else "playwright",
+        help="On a Mac, chrome talks to the open Google Chrome tab via Apple Events (fast).",
+    )
     return parser.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
+def run_chrome(url: str, out_dir: Path) -> tuple[list[dict], str, int, Path]:
+    try:
+        leads, list_name, total_hint = chrome_osa.collect_leads(url)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "not allowed" in message.lower() or "(-1743)" in message or "1002" in message:
+            raise SystemExit(
+                "macOS blocked Apple Events. System Settings → Privacy & Security → Automation: "
+                "allow Cursor (or Terminal) to control Google Chrome, then retry."
+            ) from exc
+        raise SystemExit(message) from exc
+    if not leads:
+        raise SystemExit("No leads extracted. Keep the people list open in Google Chrome and retry.")
+    out = write_files(leads, list_name, out_dir)
+    return leads, list_name, total_hint, out
+
+
+def run_playwright(url: str, out_dir: Path, profile: Path) -> tuple[list[dict], str, int, Path]:
     if sync_playwright is None:
         die_missing_playwright()
-    args = parse_args(argv)
-    url = args.url.strip()
-    lid = list_id(url)
-    print(f"list {lid}", flush=True)
-    print("Paging slowly in a real Chrome window. Prefer the Chrome extension for less risk.", flush=True)
-
     with sync_playwright() as playwright:
-        context = launch_context(playwright, args.profile)
+        context = launch_context(playwright, profile)
         page = context.pages[0] if context.pages else context.new_page()
         page.goto(page_url(url, 1), wait_until="domcontentloaded")
-        human_pause(3.0, 5.0)
+        time.sleep(3)
         first = extract(page)
         if on_login_wall(page, first):
             wait_for_login(page)
@@ -235,10 +253,23 @@ def main(argv: list[str] | None = None) -> None:
             leads, list_name, total_hint = collect_leads(page, url)
         finally:
             context.close()
-
     if not leads:
         raise SystemExit("No leads extracted. Confirm the list URL and that you are logged into Sales Navigator.")
-    out = write_files(leads, list_name, args.out)
+    out = write_files(leads, list_name, out_dir)
+    return leads, list_name, total_hint, out
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    url = args.url.strip()
+    lid = list_id(url)
+    print(f"list {lid} engine={args.engine}", flush=True)
+    if args.engine == "chrome":
+        if sys.platform != "darwin":
+            raise SystemExit("The chrome engine (Apple Events) only runs on macOS. Use --engine playwright.")
+        leads, list_name, total_hint, out = run_chrome(url, args.out)
+    else:
+        leads, list_name, total_hint, out = run_playwright(url, args.out, args.profile)
     print(f"list={list_name or 'list'} sn_total={total_hint} mix={company_mix(leads)}", flush=True)
     print(str(out), flush=True)
 

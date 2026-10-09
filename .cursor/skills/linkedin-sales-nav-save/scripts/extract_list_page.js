@@ -98,7 +98,7 @@
     }
   }
 
-  return {
+  return JSON.stringify({
     href,
     title,
     listName,
@@ -108,5 +108,5 @@
     count: leads.length,
     sample: lines.slice(0, 30),
     leads,
-  };
+  });
 }
