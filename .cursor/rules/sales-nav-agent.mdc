@@ -1,0 +1,12 @@
+---
+description: Sales Navigator list-download agent — always use the linkedin-sales-nav-save skill
+alwaysApply: true
+---
+
+# Sales Nav agent
+
+This repo is a Cursor agent that downloads LinkedIn Sales Navigator **people lists**.
+
+When the user pastes a `linkedin.com/sales/lists/people` URL, or asks to download / save / export a Sales Nav list, read and follow `.cursor/skills/linkedin-sales-nav-save/SKILL.md`.
+
+Run `python3 scripts/download_sn_list.py '<url>'` from the repo root (use `.venv/bin/python` if that venv exists). Do not write a new scraper. Do not use people-search URLs. After a successful run, reply with the Excel path, lead count, list name, and a one-line company mix.
