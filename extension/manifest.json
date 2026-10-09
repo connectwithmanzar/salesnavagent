@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "Sales Nav List Save",
+  "version": "1.0.0",
+  "description": "Download a LinkedIn Sales Navigator people list to Excel. Open a saved list, click Download.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": ["https://www.linkedin.com/*"],
+  "action": {
+    "default_title": "Download Sales Nav list",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.linkedin.com/sales/lists/people/*"],
+      "js": ["extract.js", "xlsx.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
