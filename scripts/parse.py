@@ -40,6 +40,26 @@ def safe_filename(name: str) -> str:
     return cleaned[:80]
 
 
+PUBLIC_RE = re.compile(r"(?:https?://(?:www\.)?)?linkedin\.com/in/([^/?#]+)", re.I)
+SN_LEAD_RE = re.compile(r"/sales/lead/([^,/?#]+)", re.I)
+
+
+def to_public_url(raw: str) -> str:
+    text = (raw or "").replace("\\u002f", "/").replace("\\/", "/")
+    match = PUBLIC_RE.search(text)
+    if not match:
+        return ""
+    slug = match.group(1).strip("/")
+    if not slug or slug.lower().startswith("sales") or slug.startswith("ACwAA"):
+        return ""
+    return f"https://www.linkedin.com/in/{slug}"
+
+
+def sn_lead_id(raw: str) -> str:
+    match = SN_LEAD_RE.search(raw or "")
+    return match.group(1) if match else ""
+
+
 def company_mix(leads: list[dict], limit: int = 8) -> str:
     counts: dict[str, int] = {}
     for lead in leads:

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Sales Nav List Save",
-  "version": "1.2.0",
-  "description": "Download a LinkedIn Sales Navigator people list to Excel, paging through it slowly in your own Chrome session.",
+  "version": "1.3.0",
+  "description": "Download a Sales Navigator people list to Excel with public linkedin.com/in/ URLs.",
   "permissions": ["storage", "activeTab"],
   "host_permissions": ["https://www.linkedin.com/*"],
   "action": {
@@ -21,8 +21,11 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.linkedin.com/sales/lists/people/*"],
-      "js": ["human.js", "extract.js", "xlsx.js", "content.js"],
+      "matches": [
+        "https://www.linkedin.com/sales/lists/people/*",
+        "https://www.linkedin.com/sales/lead/*"
+      ],
+      "js": ["human.js", "extract.js", "extract_public.js", "xlsx.js", "content.js"],
       "run_at": "document_idle"
     }
   ]

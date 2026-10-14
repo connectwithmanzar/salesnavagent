@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from parse import company_mix, list_id, page_url, safe_filename, split_name
+from parse import company_mix, list_id, page_url, safe_filename, sn_lead_id, split_name, to_public_url
 
 
 class ParseTests(unittest.TestCase):
@@ -34,6 +34,22 @@ class ParseTests(unittest.TestCase):
     def test_safe_filename(self) -> None:
         self.assertEqual(safe_filename("Black Forest Space"), "Black_Forest_Space")
         self.assertEqual(safe_filename("???"), "SN_people_list")
+
+    def test_to_public_url(self) -> None:
+        self.assertEqual(
+            to_public_url("https://www.linkedin.com/in/fabian-kohler?miniProfile=1"),
+            "https://www.linkedin.com/in/fabian-kohler",
+        )
+        self.assertEqual(
+            to_public_url("https://www.linkedin.com/sales/lead/ACwAADMuhsQB,NAME_SEARCH,E2cm"),
+            "",
+        )
+
+    def test_sn_lead_id(self) -> None:
+        self.assertEqual(
+            sn_lead_id("https://www.linkedin.com/sales/lead/ACwAADMuhsQB,NAME_SEARCH,E2cm"),
+            "ACwAADMuhsQB",
+        )
 
     def test_company_mix(self) -> None:
         leads = [

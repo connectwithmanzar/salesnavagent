@@ -38,12 +38,61 @@
   const leads = [];
   const seen = new Set();
 
-  function push(name, titleText, company, location, hrefLead, extra) {
+  function toPublic(raw) {
+    const text = String(raw || "").replace(/\\u002f/gi, "/").replace(/\\\//g, "/");
+    const match = text.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#"'\s]+)/i);
+    if (!match) return "";
+    const slug = match[1].replace(/\/$/, "");
+    if (!slug || /^sales/i.test(slug) || slug.startsWith("ACwAA")) return "";
+    return "https://www.linkedin.com/in/" + slug;
+  }
+
+  function snId(raw) {
+    const match = String(raw || "").match(/\/sales\/lead\/([^,/?#]+)/i);
+    return match ? match[1] : "";
+  }
+
+  function publicMap() {
+    const html = document.documentElement.innerHTML || "";
+    const map = {};
+    function absorb(idx, pub) {
+      if (!pub) return;
+      const chunk = html.slice(Math.max(0, idx - 700), idx + 500);
+      const ids = chunk.match(/ACwAA[A-Za-z0-9_-]{8,}/g) || [];
+      for (const id of ids) map[id] = pub;
+    }
+    let match;
+    const flagRe = /flagshipProfileUrl"\s*:\s*"([^"]+)"/gi;
+    while ((match = flagRe.exec(html))) absorb(match.index, toPublic(match[1]));
+    const pubRe = /publicIdentifier"\s*:\s*"([^"]+)"/gi;
+    while ((match = pubRe.exec(html))) {
+      const slug = match[1].replace(/\\u002d/gi, "-");
+      if (slug && !/^ACwAA/i.test(slug)) absorb(match.index, "https://www.linkedin.com/in/" + slug);
+    }
+    return map;
+  }
+
+  function lookupPublic(map, href) {
+    const id = snId(href);
+    if (!id) return "";
+    if (map[id]) return map[id];
+    const prefix = id.slice(0, 18);
+    for (const [key, value] of Object.entries(map)) {
+      if (key.slice(0, 18) === prefix) return value;
+    }
+    return "";
+  }
+
+  const idMap = publicMap();
+
+  function push(name, titleText, company, location, hrefLead, extra, publicHint) {
     name = (name || "").replace(/\s+/g, " ").trim();
     if (!name || name.length < 2) return;
     hrefLead = (hrefLead || "").split("?")[0];
     if (hrefLead.startsWith("/")) hrefLead = "https://www.linkedin.com" + hrefLead;
-    const key = hrefLead || name.toLowerCase();
+    const sn = /\/sales\/lead\//i.test(hrefLead) ? hrefLead : "";
+    const pub = toPublic(publicHint) || toPublic(hrefLead) || lookupPublic(idMap, hrefLead);
+    const key = (sn || pub || name).toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
     leads.push({
@@ -51,7 +100,8 @@
       title: (titleText || "").replace(/\s+/g, " ").trim(),
       company: (company || "").replace(/\s+/g, " ").trim(),
       location: (location || "").replace(/\s+/g, " ").trim(),
-      linkedin_url: hrefLead,
+      linkedin_url: pub,
+      sn_url: sn,
       extra: extra || "",
     });
   }
@@ -70,13 +120,15 @@
     for (const td of tds) {
       if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(td)) dateAdded = td;
     }
+    const inA = tr.querySelector('a[href*="/in/"]');
     push(
       nameA.innerText,
       tr.querySelector('[data-anonymize="job-title"]')?.innerText || "",
       tr.querySelector('[data-anonymize="company-name"]')?.innerText || "",
       tr.querySelector('[data-anonymize="location"]')?.innerText || "",
       nameA.getAttribute("href") || "",
-      dateAdded
+      dateAdded,
+      inA ? inA.getAttribute("href") || inA.href : ""
     );
   }
 
@@ -87,13 +139,15 @@
         .split("\n")
         .map((line) => line.replace(/\s+/g, " ").trim())
         .filter(Boolean);
+      const inA = card && card.querySelector('a[href*="/in/"]');
       push(
         a.innerText || blob[0],
         blob[1] || "",
         blob[2] || "",
         blob[3] || "",
         a.getAttribute("href") || "",
-        ""
+        "",
+        inA ? inA.getAttribute("href") || inA.href : ""
       );
     }
   }

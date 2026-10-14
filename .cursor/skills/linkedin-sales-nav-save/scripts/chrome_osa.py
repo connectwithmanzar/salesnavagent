@@ -7,11 +7,12 @@ import subprocess
 import time
 from pathlib import Path
 
-from parse import list_id, page_url
+from parse import list_id, page_url, to_public_url
 
 HERE = Path(__file__).resolve().parent
 LIST_AS = HERE / "list_sales_tabs.applescript"
 JS_PATH = HERE / "extract_list_page.js"
+PUBLIC_JS = HERE / "extract_public.js"
 
 
 def osa(path: Path) -> str:
@@ -133,7 +134,7 @@ def collect_leads(url: str) -> tuple[list[dict], str, int]:
         empty = 0
         new = 0
         for lead in leads:
-            key = (lead.get("linkedin_url") or lead.get("name") or "").lower()
+            key = (lead.get("sn_url") or lead.get("linkedin_url") or lead.get("name") or "").lower()
             if not key or key in seen:
                 continue
             seen.add(key)
@@ -144,4 +145,47 @@ def collect_leads(url: str) -> tuple[list[dict], str, int]:
             break
         if new == 0:
             break
+    resolve_missing(win, tab, all_leads)
     return all_leads, list_name, total_hint
+
+
+def extract_public(win: int, tab: int) -> dict:
+    js_path = str(PUBLIC_JS)
+    raw = osa_source(
+        f'''tell application "Google Chrome"
+  set t to tab {tab} of window {win}
+  set js to (do shell script "cat " & quoted form of "{js_path}")
+  return execute t javascript "(" & js & ")()"
+end tell'''
+    )
+    if not raw or raw == "missing value":
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def resolve_missing(win: int, tab: int, leads: list[dict]) -> None:
+    pending = [
+        lead
+        for lead in leads
+        if not to_public_url(lead.get("linkedin_url") or "") and "/sales/lead/" in (lead.get("sn_url") or "")
+    ]
+    if not pending:
+        return
+    print(f"resolving {len(pending)} public LinkedIn URLs...", flush=True)
+    for lead in pending:
+        nav(win, tab, lead["sn_url"])
+        pub = ""
+        for attempt in range(6):
+            time.sleep(2.4 if attempt == 0 else 1.0)
+            pub = to_public_url((extract_public(win, tab) or {}).get("public_url") or "")
+            if pub:
+                break
+        if pub:
+            lead["linkedin_url"] = pub
+            print(f"  {lead.get('name')} -> {pub}", flush=True)
+        else:
+            print(f"  {lead.get('name')} miss", flush=True)

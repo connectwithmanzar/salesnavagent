@@ -26,4 +26,4 @@ Teammates on any laptop can use the Chrome extension: https://connectwithmanzar.
 
 ## Output
 
-`~/Downloads/{List_Name}.xlsx`. Reply with path, lead count, list name, and a one-line company mix.
+`~/Downloads/{List_Name}.xlsx` with a **LinkedIn URL** column of public `linkedin.com/in/` profiles, not Sales Navigator `/sales/lead/` links. Reply with path, lead count, list name, and a one-line company mix.

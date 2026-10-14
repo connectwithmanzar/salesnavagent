@@ -17,7 +17,7 @@ if str(HERE) not in sys.path:
 import chrome_osa
 from excel import write_files
 from human import CHECKPOINT_RE, browse_like_person, human_pause, rest_between_pages
-from parse import company_mix, list_id, page_url
+from parse import company_mix, list_id, page_url, to_public_url
 
 try:
     from playwright.sync_api import sync_playwright
@@ -167,7 +167,7 @@ def collect_leads(page, url: str) -> tuple[list[dict], str, int]:
             empty = 0
         new = 0
         for lead in leads:
-            key = (lead.get("linkedin_url") or lead.get("name") or "").lower()
+            key = (lead.get("sn_url") or lead.get("linkedin_url") or lead.get("name") or "").lower()
             if not key or key in seen:
                 continue
             seen.add(key)
@@ -192,7 +192,35 @@ def collect_leads(page, url: str) -> tuple[list[dict], str, int]:
         else:
             page.goto(page_url(url, page_n + 1), wait_until="domcontentloaded")
         page_n += 1
+    resolve_playwright(page, all_leads)
     return all_leads, list_name, total_hint
+
+
+def resolve_playwright(page, leads: list[dict]) -> None:
+    js = (HERE / "extract_public.js").read_text(encoding="utf-8")
+    pending = [
+        lead
+        for lead in leads
+        if not to_public_url(lead.get("linkedin_url") or "") and "/sales/lead/" in (lead.get("sn_url") or "")
+    ]
+    if not pending:
+        return
+    print(f"resolving {len(pending)} public LinkedIn URLs...", flush=True)
+    for lead in pending:
+        page.goto(lead["sn_url"], wait_until="domcontentloaded")
+        pub = ""
+        for attempt in range(6):
+            time.sleep(2.4 if attempt == 0 else 1.0)
+            raw = page.evaluate(js)
+            data = json.loads(raw) if isinstance(raw, str) else raw or {}
+            pub = to_public_url((data or {}).get("public_url") or "")
+            if pub:
+                break
+        if pub:
+            lead["linkedin_url"] = pub
+            print(f"  {lead.get('name')} -> {pub}", flush=True)
+        else:
+            print(f"  {lead.get('name')} miss", flush=True)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

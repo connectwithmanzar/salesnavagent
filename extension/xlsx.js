@@ -5,9 +5,18 @@ const SN_COLUMNS = [
   "Title",
   "Company",
   "Location",
-  "Sales Navigator URL",
+  "LinkedIn URL",
   "Date added",
 ];
+
+function publicLinkedInUrl(raw) {
+  const text = String(raw || "").replace(/\\u002f/gi, "/").replace(/\\\//g, "/");
+  const match = text.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#]+)/i);
+  if (!match) return "";
+  const slug = match[1].replace(/\/$/, "");
+  if (!slug || /^sales/i.test(slug) || slug.startsWith("ACwAA")) return "";
+  return `https://www.linkedin.com/in/${slug}`;
+}
 
 function splitLeadName(full) {
   const parts = String(full || "")
@@ -29,7 +38,7 @@ function leadRows(leads) {
       lead.title || "",
       lead.company || "",
       lead.location || "",
-      lead.linkedin_url || "",
+      publicLinkedInUrl(lead.linkedin_url || lead.public_url || ""),
       lead.extra || "",
     ];
   });

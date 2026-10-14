@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from parse import safe_filename, split_name
+from parse import safe_filename, split_name, to_public_url
 
 COLUMNS = [
     "First Name",
@@ -16,7 +16,7 @@ COLUMNS = [
     "Title",
     "Company",
     "Location",
-    "Sales Navigator URL",
+    "LinkedIn URL",
     "Date added",
 ]
 
@@ -34,7 +34,8 @@ def write_files(leads: list[dict], list_name: str, out_dir: Path) -> Path:
                 "Title": lead.get("title") or "",
                 "Company": lead.get("company") or "",
                 "Location": lead.get("location") or "",
-                "Sales Navigator URL": lead.get("linkedin_url") or "",
+                "LinkedIn URL": to_public_url(lead.get("linkedin_url") or "")
+                or to_public_url(lead.get("public_url") or ""),
                 "Date added": lead.get("extra") or "",
             }
         )

@@ -32,17 +32,22 @@ async function writeJob(job) {
 }
 
 function panelHtml(state) {
+  const resolving = state.status === "running" && state.phase === "resolve";
   const running = state.status === "running";
   const done = state.status === "done";
   const error = state.status === "error";
-  const title = running
+  const title = resolving
+    ? "Finding LinkedIn URLs"
+    : running
     ? "Downloading list"
     : done
       ? "Saved"
       : error
         ? "Could not download"
         : "Sales Nav List Save";
-  const body = running
+  const body = resolving
+    ? `Personal URL ${Math.min((state.resolveIndex || 0) + 1, state.leads?.length || 0)} of ${state.leads?.length || 0}`
+    : running
     ? `Page ${state.page || 1} · ${state.leads?.length || 0} leads${
         state.total ? ` of ${state.total}` : ""
       }`
@@ -199,12 +204,45 @@ async function finishJob(job) {
 function mergeLeads(job, leads) {
   const seen = new Set(job.seen || []);
   for (const lead of leads) {
-    const key = (lead.linkedin_url || lead.name || "").toLowerCase();
+    const key = (lead.sn_url || lead.linkedin_url || lead.name || "").toLowerCase();
     if (!key || seen.has(key)) continue;
     seen.add(key);
     job.leads.push(lead);
   }
   job.seen = Array.from(seen);
+}
+
+function needsPublicResolve(job) {
+  return (job.leads || []).some(
+    (lead) => !/linkedin\.com\/in\//i.test(lead.linkedin_url || "") && /\/sales\/lead\//i.test(lead.sn_url || "")
+  );
+}
+
+async function finishOrResolve(job) {
+  if (needsPublicResolve(job)) {
+    job.phase = "resolve";
+    job.resolveIndex = 0;
+    await writeJob(job);
+    render(job);
+    await resolveNext(job);
+    return;
+  }
+  await finishJob(job);
+}
+
+async function resolveNext(job) {
+  while (job.resolveIndex < job.leads.length) {
+    const lead = job.leads[job.resolveIndex];
+    if (/linkedin\.com\/in\//i.test(lead.linkedin_url || "") || !lead.sn_url) {
+      job.resolveIndex += 1;
+      continue;
+    }
+    await writeJob(job);
+    location.assign(lead.sn_url);
+    return;
+  }
+  job.phase = "";
+  await finishJob(job);
 }
 
 async function continueJob(job) {
@@ -227,7 +265,7 @@ async function continueJob(job) {
     const fingerprint = listFingerprint();
     job.fingerprints = job.fingerprints || [];
     if (job.fingerprints.includes(fingerprint) && job.leads.length) {
-      await finishJob(job);
+      await finishOrResolve(job);
       return;
     }
     job.fingerprints.push(fingerprint);
@@ -243,7 +281,7 @@ async function continueJob(job) {
 
     const reachedTotal = job.total && job.leads.length >= job.total;
     if (reachedTotal || job.scrapedPages.length >= MAX_PAGES || job.empty >= 2) {
-      await finishJob(job);
+      await finishOrResolve(job);
       return;
     }
 
@@ -262,9 +300,33 @@ async function continueJob(job) {
 }
 
 async function boot() {
+  const job = await readJob();
+  if (job?.status === "running" && job.phase === "resolve") {
+    render(job);
+    await sleep(2400);
+    let pub = "";
+    try {
+      pub = extractPublicProfile();
+    } catch (err) {
+      pub = "";
+    }
+    if (!pub) {
+      await sleep(1000);
+      try {
+        pub = extractPublicProfile();
+      } catch (err) {
+        pub = "";
+      }
+    }
+    const lead = job.leads[job.resolveIndex];
+    if (lead && pub) lead.linkedin_url = pub;
+    job.resolveIndex = (job.resolveIndex || 0) + 1;
+    await writeJob(job);
+    await resolveNext(job);
+    return;
+  }
   const lid = listIdFromUrl(location.href);
   if (!lid) return;
-  const job = await readJob();
   if (job?.status === "running" && job.listId === lid) {
     render(job);
     await continueJob(job);
