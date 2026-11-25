@@ -8,7 +8,18 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 sys.path.insert(0, str(SCRIPTS))
 
-from parse import company_mix, list_id, page_url, safe_filename, sn_lead_id, split_name, to_public_url
+from parse import (
+    company_mix,
+    format_summary,
+    list_id,
+    page_url,
+    personal_linkedin_url,
+    safe_filename,
+    sn_lead_id,
+    split_name,
+    summarize_export,
+    to_public_url,
+)
 
 
 class ParseTests(unittest.TestCase):
@@ -51,6 +62,19 @@ class ParseTests(unittest.TestCase):
             "ACwAADMuhsQB",
         )
 
+    def test_personal_url_from_sales_nav(self) -> None:
+        self.assertEqual(
+            personal_linkedin_url(
+                "",
+                "https://www.linkedin.com/sales/lead/ACwAADMuhsQB,NAME_SEARCH,E2cm",
+            ),
+            "https://www.linkedin.com/in/ACwAADMuhsQB",
+        )
+        self.assertEqual(
+            personal_linkedin_url("https://www.linkedin.com/in/fabian-kohler"),
+            "https://www.linkedin.com/in/fabian-kohler",
+        )
+
     def test_company_mix(self) -> None:
         leads = [
             {"company": "dm"},
@@ -60,6 +84,26 @@ class ParseTests(unittest.TestCase):
         mix = company_mix(leads)
         self.assertIn("dm (2)", mix)
         self.assertIn("EDEKA (1)", mix)
+
+    def test_summarize_export(self) -> None:
+        leads = [
+            {"linkedin_url": "https://www.linkedin.com/in/fabian-kohler", "company": "A"},
+            {
+                "sn_url": "https://www.linkedin.com/sales/lead/ACwAADMuhsQB,NAME_SEARCH,E2cm",
+                "company": "B",
+            },
+            {"name": "No URL", "company": "C"},
+        ]
+        stats = summarize_export(leads, 4)
+        self.assertEqual(stats["count"], 3)
+        self.assertEqual(stats["vanity"], 1)
+        self.assertEqual(stats["member_id"], 1)
+        self.assertEqual(stats["blank"], 1)
+        self.assertTrue(stats["mismatch"])
+        self.assertFalse(stats["ok"])
+        text = format_summary(stats, "UK list", "A (1)")
+        self.assertIn("leads=3 of 4", text)
+        self.assertIn("WARN", text)
 
 
 if __name__ == "__main__":

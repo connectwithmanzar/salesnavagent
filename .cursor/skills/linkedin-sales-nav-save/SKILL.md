@@ -10,20 +10,28 @@ description: >-
 
 # LinkedIn Sales Nav save
 
-Download a **saved people list** (`/sales/lists/people/{id}`). Do not use this for people search.
+Download a **saved people list** (`/sales/lists/people/{id}`). Do not use this for people search. Do not write a new scraper. Do not visit individual profiles.
 
-On **macOS**, keep the list open in **Google Chrome** (user already logged into Sales Navigator). Run:
+## Which path
+
+- **macOS:** keep the list open in **Google Chrome** (already logged into Sales Navigator). Run the command below (Apple Events).
+- **Anyone else, or teammates:** Chrome extension at https://connectwithmanzar.github.io/salesnavagent/ — Load unpacked, navy card must say **v1.5.1**. Chrome Safety Check may warn because it is not on the Chrome Web Store; that is expected.
 
 ```bash
 python3 scripts/download_sn_list.py 'https://www.linkedin.com/sales/lists/people/{ID}'
 ```
 
-That is the fast path we used before: Apple Events (`osascript`) set the tab URL to `?page=N` and `execute javascript` on that tab. Wait ~4s on page 1 and ~5s on later pages so Sales Nav can render. Do not add extra “human” delays.
+Wait ~4s on page 1 and ~5s on later pages so Sales Nav can render. Do not add extra “human” delays. If macOS asks, allow Cursor/Terminal to control Google Chrome (System Settings → Privacy & Security → Automation).
 
-If macOS asks, allow Cursor/Terminal to control Google Chrome (System Settings → Privacy & Security → Automation). That is Apple Events, not Chrome Developer mode.
+## After a successful run
 
-Teammates on any laptop can use the Chrome extension: https://connectwithmanzar.github.io/salesnavagent/
+Read the script summary and reply with:
 
-## Output
+- Excel path
+- lead count vs Sales Nav total (`leads=N of T`)
+- LinkedIn URL mix: vanity vs member-id (`/in/ACwAA…`) vs blank
+- list name and a one-line company mix
 
-`~/Downloads/{List_Name}.xlsx` with a **LinkedIn URL** column of public `linkedin.com/in/` profiles, not Sales Navigator `/sales/lead/` links. Reply with path, lead count, list name, and a one-line company mix.
+If count does not match Sales Nav total, say the export is incomplete and stay on the list to retry. If any LinkedIn URL is blank, say so. Member-id URLs still open the profile; do not visit pages to hunt vanity slugs.
+
+Search URLs (`/sales/search/people`) are invalid — refuse them.

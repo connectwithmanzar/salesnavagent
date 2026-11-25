@@ -54,6 +54,9 @@ h1 {
   font-size: 14px;
   margin: 12px 0 40px;
 }
+a {
+  color: #1a4f78;
+}
 .steps {
   list-style: none;
   padding: 0;
@@ -102,4 +105,7 @@ code {
 .note h2 {
   margin: 0 0 8px;
   font-size: 16px;
+}
+.note + .note {
+  margin-top: 16px;
 }

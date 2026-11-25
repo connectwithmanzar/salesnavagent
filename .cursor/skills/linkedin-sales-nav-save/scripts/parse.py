@@ -41,7 +41,7 @@ def safe_filename(name: str) -> str:
 
 
 PUBLIC_RE = re.compile(r"(?:https?://(?:www\.)?)?linkedin\.com/in/([^/?#]+)", re.I)
-SN_LEAD_RE = re.compile(r"/sales/lead/([^,/?#]+)", re.I)
+SN_LEAD_RE = re.compile(r"/sales/(?:lead|people)/([^,/?#]+)", re.I)
 
 
 def to_public_url(raw: str) -> str:
@@ -60,6 +60,16 @@ def sn_lead_id(raw: str) -> str:
     return match.group(1) if match else ""
 
 
+def personal_linkedin_url(raw: str, sn_url: str = "") -> str:
+    vanity = to_public_url(raw) or to_public_url(sn_url)
+    if vanity:
+        return vanity
+    lead_id = sn_lead_id(raw) or sn_lead_id(sn_url)
+    if lead_id:
+        return f"https://www.linkedin.com/in/{lead_id}"
+    return ""
+
+
 def company_mix(leads: list[dict], limit: int = 8) -> str:
     counts: dict[str, int] = {}
     for lead in leads:
@@ -67,3 +77,52 @@ def company_mix(leads: list[dict], limit: int = 8) -> str:
         counts[company] = counts.get(company, 0) + 1
     top = sorted(counts.items(), key=lambda item: (-item[1], item[0].lower()))[:limit]
     return ", ".join(f"{name} ({n})" for name, n in top)
+
+
+def summarize_export(leads: list[dict], total_hint: int = 0) -> dict:
+    vanity = 0
+    member_id = 0
+    blank = 0
+    for lead in leads:
+        url = personal_linkedin_url(
+            lead.get("linkedin_url") or lead.get("public_url") or "",
+            lead.get("sn_url") or "",
+        )
+        if not url:
+            blank += 1
+        elif re.search(r"/in/ACwAA", url, re.I):
+            member_id += 1
+        else:
+            vanity += 1
+    count = len(leads)
+    sn_total = int(total_hint or 0)
+    mismatch = bool(sn_total and count != sn_total)
+    return {
+        "count": count,
+        "sn_total": sn_total,
+        "vanity": vanity,
+        "member_id": member_id,
+        "blank": blank,
+        "mismatch": mismatch,
+        "ok": not blank and not mismatch,
+    }
+
+
+def format_summary(stats: dict, list_name: str = "", mix: str = "") -> str:
+    total = f" of {stats['sn_total']}" if stats.get("sn_total") else ""
+    lines = [
+        f"list={list_name or 'list'} leads={stats['count']}{total}",
+        (
+            "linkedin URLs: "
+            f"vanity={stats['vanity']} member-id={stats['member_id']} blank={stats['blank']}"
+        ),
+    ]
+    if mix:
+        lines.append(f"mix={mix}")
+    if stats.get("mismatch"):
+        lines.append(
+            "WARN: extracted count does not match Sales Nav total. Stay on the people list and retry."
+        )
+    if stats.get("blank"):
+        lines.append("WARN: some rows have no LinkedIn URL.")
+    return "\n".join(lines)

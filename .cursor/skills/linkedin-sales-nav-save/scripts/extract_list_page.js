@@ -38,9 +38,16 @@
   const leads = [];
   const seen = new Set();
 
+  function decodeBlob(raw) {
+    return String(raw || "")
+      .replace(/\\u002f/gi, "/")
+      .replace(/\\u002d/gi, "-")
+      .replace(/\\\//g, "/");
+  }
+
   function toPublic(raw) {
-    const text = String(raw || "").replace(/\\u002f/gi, "/").replace(/\\\//g, "/");
-    const match = text.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#"'\s]+)/i);
+    const blob = decodeBlob(raw);
+    const match = blob.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#"'\s]+)/i);
     if (!match) return "";
     const slug = match[1].replace(/\/$/, "");
     if (!slug || /^sales/i.test(slug) || slug.startsWith("ACwAA")) return "";
@@ -48,50 +55,122 @@
   }
 
   function snId(raw) {
-    const match = String(raw || "").match(/\/sales\/lead\/([^,/?#]+)/i);
+    const match = String(raw || "").match(/\/sales\/(?:lead|people)\/([^,/?#]+)/i);
     return match ? match[1] : "";
   }
 
-  function publicMap() {
-    const html = document.documentElement.innerHTML || "";
-    const map = {};
-    function absorb(idx, pub) {
-      if (!pub) return;
-      const chunk = html.slice(Math.max(0, idx - 700), idx + 500);
-      const ids = chunk.match(/ACwAA[A-Za-z0-9_-]{8,}/g) || [];
-      for (const id of ids) map[id] = pub;
-    }
-    let match;
-    const flagRe = /flagshipProfileUrl"\s*:\s*"([^"]+)"/gi;
-    while ((match = flagRe.exec(html))) absorb(match.index, toPublic(match[1]));
-    const pubRe = /publicIdentifier"\s*:\s*"([^"]+)"/gi;
-    while ((match = pubRe.exec(html))) {
-      const slug = match[1].replace(/\\u002d/gi, "-");
-      if (slug && !/^ACwAA/i.test(slug)) absorb(match.index, "https://www.linkedin.com/in/" + slug);
-    }
-    return map;
+  function memberId(raw) {
+    const match = String(raw || "").match(/ACwAA[A-Za-z0-9_-]{6,}/);
+    return match ? match[0] : "";
   }
 
-  function lookupPublic(map, href) {
-    const id = snId(href);
-    if (!id) return "";
-    if (map[id]) return map[id];
-    const prefix = id.slice(0, 18);
-    for (const [key, value] of Object.entries(map)) {
-      if (key.slice(0, 18) === prefix) return value;
+  function identUrl(raw) {
+    const slug = decodeBlob(raw).trim();
+    if (!slug || /[/:]/.test(slug) || /^ACwAA/i.test(slug) || /^sales/i.test(slug)) return "";
+    return "https://www.linkedin.com/in/" + slug;
+  }
+
+  function walkProfiles(value, ids, names) {
+    if (!value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      value.forEach((item) => walkProfiles(item, ids, names));
+      return;
     }
+    const id = memberId(
+      value.entityUrn || value.objectUrn || value.profileId || value.memberId || value.objectId || ""
+    );
+    const pub =
+      toPublic(value.flagshipProfileUrl || value.publicProfileUrl || value.profileUrl || "") ||
+      identUrl(value.publicIdentifier || "") ||
+      identUrl(value.vanityName || "");
+    const name = [value.firstName, value.lastName].filter(Boolean).join(" ") || value.fullName || "";
+    if (id && pub) ids[id] = pub;
+    if (name && pub) names[String(name).toLowerCase()] = pub;
+    Object.keys(value).forEach((key) => walkProfiles(value[key], ids, names));
+  }
+
+  function ingestText(raw, ids, names) {
+    if (!raw || raw.length < 20) return;
+    if (!/publicIdentifier|flagshipProfileUrl|fs_salesProfile|vanityName|linkedin\.com\/in\//.test(raw)) {
+      return;
+    }
+    const blob = decodeBlob(raw);
+    try {
+      walkProfiles(JSON.parse(blob), ids, names);
+    } catch (err) {
+      /* not a single JSON document */
+    }
+    let match;
+    const pubRe = /publicIdentifier"\s*:\s*"([^"]+)"/gi;
+    while ((match = pubRe.exec(blob))) {
+      const pub = identUrl(match[1]);
+      if (!pub) continue;
+      const nearby = blob.slice(Math.max(0, match.index - 800), match.index + 400);
+      const id = memberId(nearby);
+      if (id) ids[id] = pub;
+    }
+    const flagRe = /flagshipProfileUrl"\s*:\s*"([^"]+)"/gi;
+    while ((match = flagRe.exec(blob))) {
+      const pub = toPublic(match[1]);
+      if (!pub) continue;
+      const nearby = blob.slice(Math.max(0, match.index - 800), match.index + 400);
+      const id = memberId(nearby);
+      if (id) ids[id] = pub;
+    }
+  }
+
+  function publicMaps() {
+    const ids = {};
+    const names = {};
+    const captured = document.getElementById("sn-save-captured");
+    if (captured && captured.textContent) {
+      try {
+        const data = JSON.parse(captured.textContent);
+        Object.assign(ids, data.ids || {});
+        Object.assign(names, data.names || {});
+      } catch (err) {
+        /* ignore */
+      }
+    }
+    ingestText(document.documentElement.innerHTML || "", ids, names);
+    document.querySelectorAll("code, script").forEach((el) => {
+      if (el.id === "sn-save-captured") return;
+      ingestText(el.textContent || "", ids, names);
+    });
+    return { ids, names };
+  }
+
+  function lookupPublic(maps, leadHref, name) {
+    const id = snId(leadHref) || memberId(leadHref);
+    if (id && maps.ids[id]) return maps.ids[id];
+    if (id) {
+      const prefix = id.slice(0, 18);
+      for (const [key, value] of Object.entries(maps.ids)) {
+        if (key.slice(0, 18) === prefix) return value;
+      }
+    }
+    const key = String(name || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toLowerCase();
+    if (key && maps.names[key]) return maps.names[key];
     return "";
   }
 
-  const idMap = publicMap();
+  const maps = publicMaps();
 
   function push(name, titleText, company, location, hrefLead, extra, publicHint) {
     name = (name || "").replace(/\s+/g, " ").trim();
     if (!name || name.length < 2) return;
     hrefLead = (hrefLead || "").split("?")[0];
     if (hrefLead.startsWith("/")) hrefLead = "https://www.linkedin.com" + hrefLead;
-    const sn = /\/sales\/lead\//i.test(hrefLead) ? hrefLead : "";
-    const pub = toPublic(publicHint) || toPublic(hrefLead) || lookupPublic(idMap, hrefLead);
+    const sn = /\/sales\/(?:lead|people)\//i.test(hrefLead) ? hrefLead : "";
+    const id = snId(hrefLead);
+    const pub =
+      toPublic(publicHint) ||
+      toPublic(hrefLead) ||
+      lookupPublic(maps, hrefLead, name) ||
+      (id ? "https://www.linkedin.com/in/" + id : "");
     const key = (sn || pub || name).toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);

@@ -8,6 +8,8 @@ async function activeTab() {
 async function boot() {
   const status = document.getElementById("status");
   const go = document.getElementById("go");
+  const ver = document.getElementById("ver");
+  if (ver) ver.textContent = `v${chrome.runtime.getManifest().version} · not on Chrome Web Store`;
   const tab = await activeTab();
   const url = tab?.url || "";
   if (!LIST_RE.test(url)) {

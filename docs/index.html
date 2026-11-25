@@ -8,22 +8,25 @@
   </head>
   <body>
     <main>
-      <p class="eyebrow">For the SDR team</p>
-      <h1>Download a Sales Navigator list to Excel.</h1>
+      <p class="eyebrow">Internal SDR tool · not on the Chrome Web Store</p>
+      <h1>Export a Sales Navigator people list to Excel.</h1>
       <p class="lead">
-        Install once in Chrome. Open your people list. Click <strong>Download Excel</strong>.
-        It stays in your real Chrome session and pages through the list slowly, like a person —
-        it does not open a second automated browser.
+        Load this folder in Chrome with Developer mode. Open a saved people list. Click
+        <strong>Download Excel</strong>. Names and links stay on your computer — nothing is uploaded.
       </p>
-      <a class="cta" href="./salesnav-list-save.zip">Download for Chrome</a>
-      <p class="hint">Chrome or Edge. One-time install. Takes about a minute.</p>
+      <a class="cta" href="./salesnav-list-save.zip">Download the folder (zip)</a>
+      <p class="hint">
+        Chrome or Edge. Version 1.5.1. The navy card must say <code>v1.5.1</code>.
+        <a href="./privacy.html">Privacy</a>.
+        Chrome may warn that this is not from the Chrome Web Store — that warning is expected.
+      </p>
 
       <ol class="steps">
         <li>
           <span>1</span>
           <div>
             <h2>Download and unzip</h2>
-            <p>Click the blue button. Unzip the file. You should see a folder named <code>salesnav-list-save</code>.</p>
+            <p>Download the zip. Unzip it. You should see a folder named <code>salesnav-list-save</code>.</p>
           </div>
         </li>
         <li>
@@ -37,21 +40,35 @@
           <span>3</span>
           <div>
             <h2>Load the folder</h2>
-            <p>Click <strong>Load unpacked</strong>. Choose the unzipped <code>salesnav-list-save</code> folder (the one that contains <code>manifest.json</code>).</p>
+            <p>Click <strong>Load unpacked</strong>. Choose the unzipped <code>salesnav-list-save</code> folder (the one that contains <code>manifest.json</code>). Confirm Chrome and the navy card both say <strong>1.5.1</strong>.</p>
           </div>
         </li>
         <li>
           <span>4</span>
           <div>
-            <h2>Download a list</h2>
+            <h2>Export a list</h2>
             <p>Open a Sales Navigator <strong>people list</strong>. A navy card appears at the bottom right. Click <strong>Download Excel</strong>. The file lands in Downloads.</p>
           </div>
         </li>
       </ol>
 
       <section class="note">
+        <h2>If Chrome shows a policy warning</h2>
+        <p>
+          Safety Check flags tools that are not listed on the Chrome Web Store. This one is loaded
+          unpacked on purpose for the team. If the list still exports, you can keep using it. If you
+          already had an older copy, remove it on <code>chrome://extensions</code>, then load this
+          1.5.1 folder.
+        </p>
+      </section>
+
+      <section class="note">
         <h2>What it will not do</h2>
-        <p>It only works on saved people lists (<code>/sales/lists/people/…</code>), not on search results. It never visits profiles or hits LinkedIn in the background. If Chrome shows a security check, it stops. If you already installed it, open <code>chrome://extensions</code> and click <strong>Reload</strong> so you get this slower, safer version.</p>
+        <p>
+          It only works on saved people lists (<code>/sales/lists/people/…</code>), not search results.
+          It stays on the list page and does not open each profile. Cancel stops immediately. List
+          data is not sent anywhere. See <a href="./privacy.html">privacy</a>.
+        </p>
       </section>
     </main>
   </body>

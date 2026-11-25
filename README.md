@@ -4,13 +4,13 @@ Teammates download a LinkedIn Sales Navigator **people list** to Excel from Chro
 
 **Install link:** [https://connectwithmanzar.github.io/salesnavagent/](https://connectwithmanzar.github.io/salesnavagent/)
 
-1. Open that page and click **Download for Chrome**.
-2. Unzip, then in Chrome go to `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and pick the `salesnav-list-save` folder.
-3. Open a saved people list. Click **Download Excel**. The file lands in Downloads with public `linkedin.com/in/` profile URLs.
+1. Open that page and download the zip (version **1.5.1**).
+2. Unzip, then in Chrome go to `chrome://extensions`, turn on **Developer mode**, **Load unpacked**, and pick the `salesnav-list-save` folder. Confirm the navy card says **v1.5.1**.
+3. Open a saved people list. Click **Download Excel**. The file lands in Downloads with `linkedin.com/in/` profile URLs. It stays on the list page — Cancel stops immediately.
 
-It only works on saved people lists (`/sales/lists/people/{id}`), not search results. It runs in your real Chrome session, scrolls and clicks Next with human-like pauses, and stops if LinkedIn shows a checkpoint. Nothing can make LinkedIn “unbannable”; this is the lowest-risk design because it is not a second automated browser.
+It is an internal unpacked tool, not a Chrome Web Store listing. Chrome Safety Check may warn about that; it does not mean the export is broken. If you already had an older copy, **Remove** it, then Load unpacked again — Reload on an old Downloads folder will not pick this up.
 
-If the extension is already installed, click **Reload** on `chrome://extensions` after updating.
+It only works on saved people lists (`/sales/lists/people/{id}`), not search results. It does not visit each profile. List data stays on the computer.
 
 ## Cursor / CLI on a Mac (fast path)
 

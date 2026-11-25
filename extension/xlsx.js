@@ -9,13 +9,16 @@ const SN_COLUMNS = [
   "Date added",
 ];
 
-function publicLinkedInUrl(raw) {
+function publicLinkedInUrl(raw, snUrl) {
   const text = String(raw || "").replace(/\\u002f/gi, "/").replace(/\\\//g, "/");
-  const match = text.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#]+)/i);
-  if (!match) return "";
-  const slug = match[1].replace(/\/$/, "");
-  if (!slug || /^sales/i.test(slug) || slug.startsWith("ACwAA")) return "";
-  return `https://www.linkedin.com/in/${slug}`;
+  const vanity = text.match(/(?:https?:\/\/(?:www\.)?)?linkedin\.com\/in\/([^/?#]+)/i);
+  if (vanity) {
+    const slug = vanity[1].replace(/\/$/, "");
+    if (slug && !/^sales/i.test(slug)) return `https://www.linkedin.com/in/${slug}`;
+  }
+  const sn = String(snUrl || raw || "").match(/\/sales\/lead\/([^,/?#]+)/i);
+  if (sn) return `https://www.linkedin.com/in/${sn[1]}`;
+  return "";
 }
 
 function splitLeadName(full) {
@@ -38,7 +41,7 @@ function leadRows(leads) {
       lead.title || "",
       lead.company || "",
       lead.location || "",
-      publicLinkedInUrl(lead.linkedin_url || lead.public_url || ""),
+      publicLinkedInUrl(lead.linkedin_url || lead.public_url || "", lead.sn_url || ""),
       lead.extra || "",
     ];
   });

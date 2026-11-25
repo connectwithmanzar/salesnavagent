@@ -3,6 +3,8 @@ const HOST_ID = "sn-save-host";
 const MAX_PAGES = 40;
 const MAX_ATTEMPTS = 8;
 
+let aborted = false;
+
 function listIdFromUrl(url) {
   const match = String(url || "").match(/\/sales\/lists\/people\/(\d+)/);
   return match ? match[1] : null;
@@ -24,38 +26,75 @@ async function readJob() {
 }
 
 async function writeJob(job) {
+  if (aborted && job && job.status === "running") return;
   if (!job) {
     await chrome.storage.local.remove(JOB_KEY);
     return;
   }
+  if (job.status === "running") {
+    const latest = await readJob();
+    if (latest && latest.status === "cancelled") return;
+  }
   await chrome.storage.local.set({ [JOB_KEY]: job });
 }
 
+async function waitMs(ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) {
+    if (aborted) return;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+}
+
+function extensionVersion() {
+  try {
+    return chrome.runtime.getManifest().version || "";
+  } catch (err) {
+    return "";
+  }
+}
+
+function urlQuality(leads) {
+  let vanity = 0;
+  let member = 0;
+  let blank = 0;
+  for (const lead of leads || []) {
+    const url = publicLinkedInUrl(lead.linkedin_url || lead.public_url || "", lead.sn_url || "");
+    if (!url) blank += 1;
+    else if (/\/in\/ACwAA/i.test(url)) member += 1;
+    else vanity += 1;
+  }
+  return { vanity, member, blank, count: (leads || []).length };
+}
+
 function panelHtml(state) {
-  const resolving = state.status === "running" && state.phase === "resolve";
   const running = state.status === "running";
   const done = state.status === "done";
   const error = state.status === "error";
-  const title = resolving
-    ? "Finding LinkedIn URLs"
-    : running
+  const version = extensionVersion();
+  const quality = urlQuality(state.leads);
+  const title = running
     ? "Downloading list"
     : done
       ? "Saved"
       : error
         ? "Could not download"
         : "Sales Nav List Save";
-  const body = resolving
-    ? `Personal URL ${Math.min((state.resolveIndex || 0) + 1, state.leads?.length || 0)} of ${state.leads?.length || 0}`
-    : running
-    ? `Page ${state.page || 1} · ${state.leads?.length || 0} leads${
-        state.total ? ` of ${state.total}` : ""
-      }`
-    : done
-      ? `${state.leads?.length || 0} leads saved to Downloads`
-      : error
-        ? state.message || "Try again on this people list."
-        : "Download this people list to Excel.";
+  let body = "Download this people list to Excel.";
+  if (running) {
+    body = `Page ${state.page || 1} · ${state.leads?.length || 0} leads${
+      state.total ? ` of ${state.total}` : ""
+    }`;
+  } else if (done) {
+    const totalNote = state.total ? ` of ${state.total}` : "";
+    body = `${quality.count} leads saved to Downloads${totalNote}. ${quality.vanity} named URLs, ${quality.member} member-id URLs.`;
+    if (state.total && quality.count !== Number(state.total)) {
+      body += " Count does not match Sales Nav total — stay on the list and retry.";
+    }
+    if (quality.blank) body += ` ${quality.blank} rows have no LinkedIn URL.`;
+  } else if (error) {
+    body = state.message || "Try again on this people list.";
+  }
   const action = running
     ? `<button class="ghost" id="sn-cancel" type="button">Cancel</button>`
     : `<button class="primary" id="sn-go" type="button">Download Excel</button>`;
@@ -83,12 +122,14 @@ function panelHtml(state) {
       .ghost { background: transparent; color: #c5d4e6; border: 1px solid #3a5573; }
       .bar { height: 4px; background: #1c3b5c; border-radius: 99px; overflow: hidden; margin-bottom: 12px; }
       .bar > span { display: block; height: 100%; background: #3ec6ff; width: var(--pct, 12%); }
+      .ver { margin-top: 10px; font-size: 11px; color: #8aa0b8; }
     </style>
     <div class="wrap">
       <h1>${title}</h1>
       <p>${body}</p>
       ${running ? `<div class="bar"><span style="--pct:${progressPct(state)}%"></span></div>` : ""}
       ${action}
+      <div class="ver">v${version || "—"} · not on Chrome Web Store</div>
     </div>
   `;
 }
@@ -126,10 +167,19 @@ function currentPage() {
   return match ? parseInt(match[1], 10) : 1;
 }
 
+function fillMemberUrls(job) {
+  for (const lead of job.leads || []) {
+    if (/linkedin\.com\/in\//i.test(lead.linkedin_url || "")) continue;
+    const match = String(lead.sn_url || "").match(/\/sales\/(?:lead|people)\/([^,/?#]+)/i);
+    if (match) lead.linkedin_url = "https://www.linkedin.com/in/" + match[1];
+  }
+}
+
 async function scrapeOnce() {
   let last = {};
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
-    await sleep(attempt === 0 ? 4000 : 1500);
+    await waitMs(attempt === 0 ? 4000 : 1500);
+    if (aborted) return { cancelled: true, leads: [] };
     if (pageLooksRestricted()) return { blocked: true, leads: [] };
     const data = extractListPage();
     if (data) last = data;
@@ -141,9 +191,11 @@ async function scrapeOnce() {
 }
 
 async function moveToNextPage(job) {
+  if (aborted) return "cancelled";
   if (pageLooksRestricted()) return "restricted";
   job.page = currentPage() + 1;
   await writeJob(job);
+  if (aborted) return "cancelled";
   location.assign(pageUrlFor(job.startUrl || location.href, job.page));
   return "reload";
 }
@@ -151,6 +203,7 @@ async function moveToNextPage(job) {
 async function startJob() {
   const lid = listIdFromUrl(location.href);
   if (!lid) return;
+  aborted = false;
   const job = {
     status: "running",
     listId: lid,
@@ -174,11 +227,16 @@ async function startJob() {
 }
 
 async function stopJob() {
-  await writeJob(null);
+  aborted = true;
+  await chrome.storage.local.set({ [JOB_KEY]: { status: "cancelled" } });
   render({ status: "idle" });
 }
 
 async function finishJob(job) {
+  if (aborted || job.status === "cancelled") {
+    render({ status: "idle" });
+    return;
+  }
   if (job.blocked || pageLooksRestricted()) {
     job.status = "error";
     job.message =
@@ -194,11 +252,14 @@ async function finishJob(job) {
     render(job);
     return;
   }
+  fillMemberUrls(job);
   downloadLeads(job.leads, job.listName);
   job.status = "done";
   await writeJob(job);
   render(job);
-  setTimeout(() => writeJob(null), 8000);
+  setTimeout(() => {
+    if (!aborted) writeJob(null);
+  }, 8000);
 }
 
 function mergeLeads(job, leads) {
@@ -212,41 +273,8 @@ function mergeLeads(job, leads) {
   job.seen = Array.from(seen);
 }
 
-function needsPublicResolve(job) {
-  return (job.leads || []).some(
-    (lead) => !/linkedin\.com\/in\//i.test(lead.linkedin_url || "") && /\/sales\/lead\//i.test(lead.sn_url || "")
-  );
-}
-
-async function finishOrResolve(job) {
-  if (needsPublicResolve(job)) {
-    job.phase = "resolve";
-    job.resolveIndex = 0;
-    await writeJob(job);
-    render(job);
-    await resolveNext(job);
-    return;
-  }
-  await finishJob(job);
-}
-
-async function resolveNext(job) {
-  while (job.resolveIndex < job.leads.length) {
-    const lead = job.leads[job.resolveIndex];
-    if (/linkedin\.com\/in\//i.test(lead.linkedin_url || "") || !lead.sn_url) {
-      job.resolveIndex += 1;
-      continue;
-    }
-    await writeJob(job);
-    location.assign(lead.sn_url);
-    return;
-  }
-  job.phase = "";
-  await finishJob(job);
-}
-
 async function continueJob(job) {
-  while (job.status === "running") {
+  while (!aborted && job.status === "running") {
     if (pageLooksRestricted()) {
       job.blocked = true;
       await finishJob(job);
@@ -254,6 +282,7 @@ async function continueJob(job) {
     }
     render(job);
     const data = await scrapeOnce();
+    if (aborted || data?.cancelled) return;
     if (data?.blocked || pageLooksRestricted()) {
       job.blocked = true;
       await finishJob(job);
@@ -265,7 +294,7 @@ async function continueJob(job) {
     const fingerprint = listFingerprint();
     job.fingerprints = job.fingerprints || [];
     if (job.fingerprints.includes(fingerprint) && job.leads.length) {
-      await finishOrResolve(job);
+      await finishJob(job);
       return;
     }
     job.fingerprints.push(fingerprint);
@@ -277,19 +306,21 @@ async function continueJob(job) {
     else job.empty = 0;
     job.page = currentPage();
     await writeJob(job);
+    if (aborted) return;
     render(job);
 
     const reachedTotal = job.total && job.leads.length >= job.total;
     if (reachedTotal || job.scrapedPages.length >= MAX_PAGES || job.empty >= 2) {
-      await finishOrResolve(job);
+      await finishJob(job);
       return;
     }
 
     const latest = await readJob();
-    if (!latest || latest.status !== "running") return;
+    if (!latest || latest.status !== "running" || aborted) return;
     Object.assign(job, latest);
 
     const moved = await moveToNextPage(job);
+    if (moved === "cancelled") return;
     if (moved === "restricted") {
       job.blocked = true;
       await finishJob(job);
@@ -301,38 +332,19 @@ async function continueJob(job) {
 
 async function boot() {
   const job = await readJob();
-  if (job?.status === "running" && job.phase === "resolve") {
-    render(job);
-    await sleep(2400);
-    let pub = "";
-    try {
-      pub = extractPublicProfile();
-    } catch (err) {
-      pub = "";
-    }
-    if (!pub) {
-      await sleep(1000);
-      try {
-        pub = extractPublicProfile();
-      } catch (err) {
-        pub = "";
-      }
-    }
-    const lead = job.leads[job.resolveIndex];
-    if (lead && pub) lead.linkedin_url = pub;
-    job.resolveIndex = (job.resolveIndex || 0) + 1;
-    await writeJob(job);
-    await resolveNext(job);
+  if (!job || job.status === "cancelled" || job.status !== "running") {
+    const lid = listIdFromUrl(location.href);
+    if (lid) render(job && job.listId === lid ? job : { status: "idle" });
     return;
   }
   const lid = listIdFromUrl(location.href);
   if (!lid) return;
-  if (job?.status === "running" && job.listId === lid) {
+  if (job.listId === lid) {
     render(job);
     await continueJob(job);
     return;
   }
-  render(job && job.listId === lid ? job : { status: "idle" });
+  render({ status: "idle" });
 }
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -340,8 +352,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     startJob().then(() => sendResponse({ ok: true }));
     return true;
   }
+  if (message?.type === "SN_SAVE_CANCEL") {
+    stopJob().then(() => sendResponse({ ok: true }));
+    return true;
+  }
   if (message?.type === "SN_SAVE_STATUS") {
-    readJob().then((job) => sendResponse({ job, url: location.href }));
+    readJob().then((current) => sendResponse({ job: current, url: location.href }));
     return true;
   }
   return false;
